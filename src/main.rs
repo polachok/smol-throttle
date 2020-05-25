@@ -5,6 +5,22 @@ use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Instant;
 
+async fn yield_now(name: &'static str) {
+    use std::task::Poll;
+    let mut do_it = true;
+    futures_util::future::poll_fn::<(), _>(|cx| {
+        if do_it {
+            do_it = false;
+            cx.waker().wake_by_ref();
+            println!("sleeping {}", name);
+            Poll::Pending
+        } else {
+            println!("working {}", name);
+            Poll::Ready(())
+        }
+    }).await
+}
+
 fn ping_pong_smol_write(count: u64) {
     use futures_util::io::{AsyncReadExt, AsyncWriteExt};
     smol::run(async {
@@ -14,10 +30,13 @@ fn ping_pong_smol_write(count: u64) {
         let mut b = Async::new(b).unwrap();
 
         let write_task = async move {
-            for _ in 0..count {
+            for i in 0..count {
                 let now = [0u8; 8];
                 println!("{:?} written {:?}", Instant::now(), now);
                 b.write(&now).await.unwrap();
+                if i % 10 == 0 {
+                    yield_now("writer").await;
+                }
             }
         };
         let read_task = async move {
